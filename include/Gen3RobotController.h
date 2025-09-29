@@ -51,6 +51,9 @@ public:
     // Initialize the robot controller
     bool initialize();
 
+    // Clear robot faults - should be called before entering low-level mode
+    bool clearFaults();
+
     // Enter/Exit low-level control mode
     bool enterLowLevelMode();
     bool exitLowLevelMode();
