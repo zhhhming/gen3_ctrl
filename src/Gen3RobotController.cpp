@@ -116,6 +116,9 @@ bool Gen3RobotController::initialize() {
     } catch (std::exception& ex) {
         std::cerr << "Standard exception: " << ex.what() << std::endl;
         return false;
+    } catch (...) {
+        std::cerr << "Unknown exception during initialization" << std::endl;
+        return false;
     }
 }
 
@@ -139,10 +142,38 @@ bool Gen3RobotController::createSessions() {
         std::cout << "UDP session created" << std::endl;
 
         return true;
+    } catch (k_api::KDetailedException& ex) {
+        std::cerr << "Kortex exception during session creation: " << ex.what() << std::endl;
+        return false;
     } catch (std::exception& ex) {
         std::cerr << "Session creation failed: " << ex.what() << std::endl;
         return false;
+    } catch (...) {
+        std::cerr << "Unknown exception during session creation" << std::endl;
+        return false;
     }
+}
+
+// Clear robot faults
+bool Gen3RobotController::clearFaults() {
+    if (!base_client_) {
+        std::cerr << "Gen3RobotController: base client not available, cannot clear faults." << std::endl;
+        return false;
+    }
+
+    try {
+        std::cout << "Clearing robot faults..." << std::endl;
+        base_client_->ClearFaults();
+        std::cout << "Faults cleared successfully" << std::endl;
+        return true;
+    } catch (const k_api::KDetailedException& ex) {
+        std::cerr << "Gen3RobotController: failed to clear faults. " << ex.what() << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Gen3RobotController: failed to clear faults. " << ex.what() << std::endl;
+    } catch (...) {
+        std::cerr << "Gen3RobotController: failed to clear faults due to an unknown error." << std::endl;
+    }
+    return false;
 }
 
 // Enter low-level control mode
@@ -150,6 +181,17 @@ bool Gen3RobotController::enterLowLevelMode() {
     if (in_low_level_mode_) {
         std::cout << "Already in low-level mode" << std::endl;
         return true;
+    }
+
+    if (!base_client_) {
+        std::cerr << "Gen3RobotController: base client not available, cannot enter low level mode." << std::endl;
+        return false;
+    }
+
+    // Clear any existing faults before entering low-level mode
+    if (!clearFaults()) {
+        std::cerr << "Gen3RobotController: aborting low level mode switch because clearing faults failed." << std::endl;
+        return false;
     }
 
     std::cout << "Entering low-level servoing mode..." << std::endl;
@@ -190,10 +232,14 @@ bool Gen3RobotController::enterLowLevelMode() {
         std::cout << "Low-level servoing mode activated" << std::endl;
         return true;
 
-    } catch (k_api::KDetailedException& ex) {
-        std::cerr << "Failed to enter low-level mode: " << ex.what() << std::endl;
-        return false;
+    } catch (const k_api::KDetailedException& ex) {
+        std::cerr << "Gen3RobotController: failed to enter low level mode. " << ex.what() << std::endl;
+    } catch (const std::exception& ex) {
+        std::cerr << "Gen3RobotController: failed to enter low level mode. " << ex.what() << std::endl;
+    } catch (...) {
+        std::cerr << "Gen3RobotController: failed to enter low level mode due to an unknown error." << std::endl;
     }
+    return false;
 }
 
 // Initialize base command with current positions
@@ -233,8 +279,14 @@ bool Gen3RobotController::initializeBaseCommand() {
         frame_id_ = 0;
 
         return true;
+    } catch (k_api::KDetailedException& ex) {
+        std::cerr << "Failed to initialize base command: " << ex.what() << std::endl;
+        return false;
     } catch (std::exception& ex) {
         std::cerr << "Failed to initialize base command: " << ex.what() << std::endl;
+        return false;
+    } catch (...) {
+        std::cerr << "Failed to initialize base command due to unknown error" << std::endl;
         return false;
     }
 }
@@ -261,6 +313,12 @@ bool Gen3RobotController::exitLowLevelMode() {
 
     } catch (k_api::KDetailedException& ex) {
         std::cerr << "Failed to exit low-level mode: " << ex.what() << std::endl;
+        return false;
+    } catch (std::exception& ex) {
+        std::cerr << "Failed to exit low-level mode: " << ex.what() << std::endl;
+        return false;
+    } catch (...) {
+        std::cerr << "Failed to exit low-level mode due to unknown error" << std::endl;
         return false;
     }
 }
@@ -341,7 +399,6 @@ bool Gen3RobotController::sendCommandAndRefresh() {
             base_command_.mutable_actuators(i)->set_command_id(frame_id_);
         }
         
-        
         // Send command and get feedback
         base_feedback_ = base_cyclic_client_->Refresh(base_command_);
         
@@ -351,6 +408,12 @@ bool Gen3RobotController::sendCommandAndRefresh() {
         return true;
     } catch (k_api::KDetailedException& ex) {
         std::cerr << "Failed to send command: " << ex.what() << std::endl;
+        return false;
+    } catch (std::exception& ex) {
+        std::cerr << "Failed to send command: " << ex.what() << std::endl;
+        return false;
+    } catch (...) {
+        std::cerr << "Failed to send command due to unknown error" << std::endl;
         return false;
     }
 }
@@ -387,6 +450,12 @@ bool Gen3RobotController::refreshOnly() {
             return true;
         } catch (k_api::KDetailedException& ex) {
             std::cerr << "Failed to refresh feedback: " << ex.what() << std::endl;
+            return false;
+        } catch (std::exception& ex) {
+            std::cerr << "Failed to refresh feedback: " << ex.what() << std::endl;
+            return false;
+        } catch (...) {
+            std::cerr << "Failed to refresh feedback due to unknown error" << std::endl;
             return false;
         }
     }
@@ -426,6 +495,10 @@ void Gen3RobotController::stopRobot() {
         }
     } catch (k_api::KDetailedException& ex) {
         std::cerr << "Failed to stop robot: " << ex.what() << std::endl;
+    } catch (std::exception& ex) {
+        std::cerr << "Failed to stop robot: " << ex.what() << std::endl;
+    } catch (...) {
+        std::cerr << "Failed to stop robot due to unknown error" << std::endl;
     }
 }
 
@@ -498,7 +571,11 @@ void Gen3RobotController::closeSessions() {
             udp_session_manager_->CloseSession(options);
             std::cout << "UDP session closed" << std::endl;
         }
+    } catch (k_api::KDetailedException& ex) {
+        std::cerr << "Kortex exception closing sessions: " << ex.what() << std::endl;
     } catch (std::exception& ex) {
         std::cerr << "Error closing sessions: " << ex.what() << std::endl;
+    } catch (...) {
+        std::cerr << "Unknown error closing sessions" << std::endl;
     }
 }
