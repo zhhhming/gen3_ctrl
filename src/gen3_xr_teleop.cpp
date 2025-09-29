@@ -211,8 +211,9 @@ private:
     Eigen::Matrix3d R_z_90_cw_;
     
     // Filter state
-    std::deque<std::vector<float>> joint_history_;
-    const size_t filter_window_ = 3;
+    std::vector<float> filtered_joint_state_;
+    bool filter_initialized_ = false;
+    const float filter_alpha_ = 0.2f;
     
     bool initializePython() {
         try {
@@ -260,13 +261,15 @@ private:
             }
             
             // Get initial joint positions
-            auto positions = robot_controller_->getJointPositions();
+            auto positions = normalizeAngles(robot_controller_->getJointPositions());
             {
                 std::lock_guard<std::mutex> lock(state_mutex_);
                 current_joints_ = positions;
                 target_joints_ = positions;  // Initialize targets to current
             }
             
+            initializeFilterState(positions);
+
             std::cout << "Robot controller initialized" << std::endl;
             return true;
             
@@ -274,6 +277,33 @@ private:
             std::cerr << "Robot initialization error: " << e.what() << std::endl;
             return false;
         }
+    }
+    float normalizeAngle(float angle) const {
+        float normalized = std::fmod(angle + 180.0f, 360.0f);
+        if (normalized < 0.0f) {
+            normalized += 360.0f;
+        }
+        return normalized - 180.0f;
+    }
+
+    std::vector<float> normalizeAngles(const std::vector<float>& angles) const {
+        std::vector<float> normalized;
+        normalized.reserve(angles.size());
+        for (float angle : angles) {
+            normalized.push_back(normalizeAngle(angle));
+        }
+        return normalized;
+    }
+
+    float unwrapAngle(float target, float reference) const {
+        double unwrapped = static_cast<double>(reference) +
+                           std::remainder(static_cast<double>(target) - static_cast<double>(reference), 360.0);
+        return static_cast<float>(unwrapped);
+    }
+
+    void initializeFilterState(const std::vector<float>& initial_positions) {
+        filtered_joint_state_ = initial_positions;
+        filter_initialized_ = true;
     }
     
     bool initializeTracIK() {
@@ -490,7 +520,7 @@ private:
                         // Convert solution to degrees and update target
                         std::lock_guard<std::mutex> lock(state_mutex_);
                         for (int i = 0; i < num_joints_; ++i) {
-                            target_joints_[i] = ik_solution(i) * 180.0 / M_PI;
+                            target_joints_[i] = normalizeAngle(ik_solution(i) * 180.0 / M_PI);
                         }
                     } else {
                         // IK failed, keep previous target
@@ -516,30 +546,21 @@ private:
         std::cout << "IK thread stopped" << std::endl;
     }
     
-    std::vector<float> filterJointPositions(const std::vector<float>& new_positions) {
-        // Add to history
-        joint_history_.push_back(new_positions);
-        if (joint_history_.size() > filter_window_) {
-            joint_history_.pop_front();
+    std::vector<float> filterJointPositions(const std::vector<float>& target_positions) {
+        if (!filter_initialized_) {
+            initializeFilterState(target_positions);
+            return target_positions;
         }
-        
-        // If not enough history, return as-is
-        if (joint_history_.size() < filter_window_) {
-            return new_positions;
-        }
-        
-        // Simple moving average filter
+
         std::vector<float> filtered(num_joints_, 0.0f);
-        for (const auto& positions : joint_history_) {
-            for (int i = 0; i < num_joints_; ++i) {
-                filtered[i] += positions[i];
-            }
-        }
-        
         for (int i = 0; i < num_joints_; ++i) {
-            filtered[i] /= joint_history_.size();
+            float unwrapped_target = unwrapAngle(target_positions[i], filtered_joint_state_[i]);
+            float filtered_angle = filter_alpha_ * unwrapped_target + (1.0f - filter_alpha_) * filtered_joint_state_[i];
+            filtered[i] = filtered_angle;
+            filtered_joint_state_[i] = filtered_angle;
         }
         
+
         return filtered;
     }
     
@@ -580,7 +601,7 @@ private:
                 }
                 
                 // Update current joint positions
-                auto current = robot_controller_->getJointPositions();
+                auto current = normalizeAngles(robot_controller_->getJointPositions());
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
                     current_joints_ = current;
