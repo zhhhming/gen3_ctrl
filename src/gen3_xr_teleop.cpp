@@ -19,7 +19,15 @@
 #include <cmath>
 #include <deque>
 #include <signal.h>
-
+#include <fstream>
+#include <algorithm>
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#endif
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 // Python embedding
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
@@ -157,7 +165,7 @@ public:
         // Clean up Python
         if (Py_IsInitialized()) {
             xr_client_ = py::none();
-            Py_Finalize();
+            py::finalize_interpreter();
         }
     }
     
@@ -445,9 +453,13 @@ private:
             
             try {
                 // Get XR inputs
-                float grip_value = getXRValue("right_grip");
-                float trigger_value = getXRValue("right_trigger");
-                
+                float grip_value = 0.f, trigger_value = 0.f;
+                {
+                    py::gil_scoped_acquire gil;
+                    grip_value = getXRValue("right_grip");
+                    trigger_value = getXRValue("right_trigger");
+                }
+                                
                 // Update gripper target
                 {
                     std::lock_guard<std::mutex> lock(state_mutex_);
